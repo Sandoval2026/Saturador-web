@@ -915,51 +915,95 @@ function confirmModal(){
 }
 document.getElementById('m-h').addEventListener('keydown',e=>{if(e.key==='Enter')confirmModal();});
 
-function push(emb,forn,h){items.push({emb,forn,qtde:0,h});render();}
-function remove(i){items.splice(i,1);render();}
+function push(emb,forn,h){
+  items.push({emb,forn,qtde:0,h});
+  syncTabela();
+  // Limpa o campo de busca e o select de embalagem após adicionar,
+  // permitindo selecionar outro fornecedor imediatamente
+  document.getElementById('forn-search').value='';
+  document.getElementById('sel-emb').innerHTML='<option value="">— Selecione o fornecedor primeiro —</option>';
+  fornSelecionado='';
+  document.getElementById('forn-search').focus();
+}
+function remove(i){items.splice(i,1);syncTabela();}
 
-// MELHORIA 1: Limpar tudo
 function limparCarga(){
   if(!confirm('Limpar todas as embalagens da carga?'))return;
   items=[];
-  render();
+  syncTabela();
 }
 
-function render(){
+// ─── syncTabela ────────────────────────────────────────────────────────────
+// NUNCA reescreve linhas existentes — só adiciona/remove linhas pelo índice.
+// Isso garante que o cursor nunca perde o foco durante a digitação.
+function criarLinha(i){
+  const it=items[i], e=it.emb;
+  const nom=it.forn.split(' - ')[0];
+  const tr=document.createElement('tr');
+  tr.dataset.i=i;
+  if(!it.qtde||it.qtde<=0) tr.classList.add('row-invalid');
+  tr.innerHTML=
+    '<td><span class="ct">'+e.codigo+'</span><span class="ft">'+nom+'</span></td>'
+   +'<td><span class="dtt">'+e.comprimento+'×'+e.largura+'</span></td>'
+   +'<td><input type="number" class="ih" min="0.01" step="0.01"'
+   +  ' placeholder="alt" title="Altura (m)"></td>'
+   +'<td><input type="number" class="iq" min="1"'
+   +  ' placeholder="qtde"></td>'
+   +'<td><button class="br">×</button></td>';
+  const [,, tdH, tdQ, tdX] = tr.children;
+  const inH=tdH.querySelector('input'), inQ=tdQ.querySelector('input');
+  if(it.h)   inH.value=it.h;
+  if(it.qtde) inQ.value=it.qtde;
+  inH.addEventListener('input',()=>{
+    items[i].h=parseFloat(inH.value)||0;
+    atualizarResumo();
+  });
+  inQ.addEventListener('input',()=>{
+    items[i].qtde=parseInt(inQ.value)||0;
+    tr.classList.toggle('row-invalid',!items[i].qtde||items[i].qtde<=0);
+    atualizarResumo();
+  });
+  tdX.querySelector('button').addEventListener('click',()=>remove(i));
+  return tr;
+}
+
+function syncTabela(){
   const tb=document.getElementById('emb-tbody');
-  const btnClear = document.getElementById('btn-clear');
-  const cargaBar = document.getElementById('carga-bar');
+  const btnClear=document.getElementById('btn-clear');
+  const cargaBar=document.getElementById('carga-bar');
 
   if(!items.length){
-    tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);font-size:11px;padding:16px;font-family:IBM Plex Mono,monospace;">Nenhuma embalagem adicionada</td></tr>';
+    tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);font-size:11px;padding:16px;font-family:monospace;">Nenhuma embalagem adicionada</td></tr>';
     btnClear.style.display='none';
     cargaBar.style.display='none';
     return;
   }
-
   btnClear.style.display='block';
   cargaBar.style.display='flex';
 
-  // MELHORIA 3: highlight linhas inválidas em tempo real
-  tb.innerHTML=items.map((it,i)=>{
-    const e=it.emb;
-    const invalid = it.qtde<=0 ? 'row-invalid' : '';
-    const fs=it.forn.split(' - ').slice(1).join(' - ').substring(0,24);
-    return `<tr class="${invalid}">
-      <td><span class="ct">${e.codigo}</span><span class="ft">${fs}</span></td>
-      <td><span class="dtt">${e.comprimento}×${e.largura}</span></td>
-      <td><input type="number" class="ih" min="0.01" step="0.01" value="${it.h||''}" placeholder="alt" title="Altura (m)" oninput="items[${i}].h=parseFloat(this.value)||0;render()"></td>
-      <td><input type="number" class="iq" min="1" value="${it.qtde||''}" placeholder="qtde" oninput="items[${i}].qtde=parseInt(this.value)||0;render()"></td>
-      <td><button class="br" onclick="remove(${i})">×</button></td>
-    </tr>`;
-  }).join('');
+  // Remove linhas que não correspondem mais a um índice válido
+  Array.from(tb.querySelectorAll('tr[data-i]')).forEach(row=>{
+    if(parseInt(row.dataset.i)>=items.length) row.remove();
+  });
 
-  // MELHORIA 5: resumo
-  const totalUnits = items.reduce((s,it)=>s+(it.qtde||0),0);
-  const totalVol   = items.reduce((s,it)=>s+(it.qtde||0)*it.emb.comprimento*it.emb.largura*(it.h||0),0);
-  document.getElementById('cb-tipos').textContent = items.length;
-  document.getElementById('cb-units').textContent = totalUnits;
-  document.getElementById('cb-vol').textContent   = totalVol.toFixed(2).replace('.',',');
+  // Adiciona linhas que ainda não existem no DOM
+  items.forEach((_,i)=>{
+    if(!tb.querySelector('tr[data-i="'+i+'"]'))
+      tb.appendChild(criarLinha(i));
+  });
+
+  atualizarResumo();
+}
+
+// alias para compatibilidade com calcular() que chama render()
+function render(){ syncTabela(); }
+
+function atualizarResumo(){
+  const totalUnits=items.reduce((s,it)=>s+(it.qtde||0),0);
+  const totalVol  =items.reduce((s,it)=>s+(it.qtde||0)*it.emb.comprimento*it.emb.largura*(it.h||0),0);
+  document.getElementById('cb-tipos').textContent=items.length;
+  document.getElementById('cb-units').textContent=totalUnits;
+  document.getElementById('cb-vol').textContent  =totalVol.toFixed(2).replace('.',',');
 }
 
 // ---- CALCULATION ----
@@ -1091,7 +1135,7 @@ function showDet(r, isRecommended){
   badge.style.display = isRecommended ? 'inline-block' : 'none';
 
   document.getElementById('dtbody').innerHTML=r.det.map(d=>{
-    const fs=d.forn.split(' - ').slice(1).join(' - ').substring(0,20);
+    const fs=d.forn.split(' - ')[0];
     const pct=((d.vol_f/r.v.volume)*100).toFixed(1);
     return `<tr>
       <td><span class="ct">${d.emb.codigo}</span></td>
@@ -1123,7 +1167,7 @@ function exportCSV(){
     ['Embalagem','Fornecedor','C (m)','L (m)','A (m)','Qtde','Lat. máx','Fil. máx','Emp. máx','Fil. usadas','Vol. físico (m³)','% veículo'],
     ...r.det.map(d=>[
       d.emb.codigo,
-      d.forn.split(' - ').slice(1).join(' - '),
+      d.forn.split(' - ')[0],
       d.emb.comprimento, d.emb.largura, d.h,
       d.qtde, d.lat, d.fil, d.emp, d.fil_used,
       d.vol_f.toFixed(4),
